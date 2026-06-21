@@ -1169,7 +1169,26 @@ function M.sections.image(opts)
         auto_resize = true,
       }
 
-      local placement = Snacks.image.placement.new(buf, opts.path, img_opts)
+      -- Defer placement creation to work around Ghostty race condition:
+      -- Ghostty isolates the image cache per-screen instead of sharing it globally.
+      -- During Neovim startup, a screen switch to the alternate screen occurs.
+      -- If image transmission (t=f) happens before the screen switch is complete,
+      -- the image is stored in the main screen's cache. The subsequent placement (a=p)
+      -- happens on the alt screen and fails with ENOENT. Deferring ensures the
+      -- commands are sent after the alternate screen is active.
+      local placement
+      local function create_placement()
+        if buf and vim.api.nvim_buf_is_valid(buf) then
+          placement = Snacks.image.placement.new(buf, opts.path, img_opts)
+        end
+      end
+
+      local is_ghostty = Snacks.image.terminal.env().name:find("ghostty") ~= nil
+      if is_ghostty then
+        vim.defer_fn(create_placement, 50)
+      else
+        create_placement()
+      end
 
       local pane_width = self.opts.width - (opts.indent or 0)
       local win_width = math.min(width, pane_width)
